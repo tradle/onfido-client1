@@ -1,0 +1,27 @@
+[
+  {
+    "id": "4143",
+    "name": "Package group name",
+    "group_only": false,
+    "report_types": [
+      {
+        "id": "70",
+        "name": "identity",
+        "variant": "kyc",
+        "options": []
+      },
+      {
+        "id": "29",
+        "name": "document",
+        "variant": null,
+        "options": []
+      },
+      {
+        "id": "59",
+        "name": "watchlist",
+        "variant": "full",
+        "options": []
+      }
+    ]
+  }
+]

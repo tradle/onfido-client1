@@ -1,0 +1,15 @@
+{
+  "0cc317bc-00a5-4e4b-8085-4485fceab85a": [
+    {
+      "id": "f952a241-9626-4db3-a28c-76f66b6ee3ae",
+      "created_at": "2016-12-21T02:50:34Z",
+      "file_name": "license.jpeg",
+      "file_type": "jpeg",
+      "file_size": 75112,
+      "type": "driving_licence",
+      "side": null,
+      "href": "/v2/applicants/0cc317bc-00a5-4e4b-8085-4485fceab85a/documents/f952a241-9626-4db3-a28c-76f66b6ee3ae",
+      "download_href": "/v2/applicants/0cc317bc-00a5-4e4b-8085-4485fceab85a/documents/f952a241-9626-4db3-a28c-76f66b6ee3ae/download"
+    }
+  ]
+}

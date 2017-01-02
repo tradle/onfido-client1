@@ -1,0 +1,74 @@
+{
+  "tradle.PersonalInfo": {
+    "_t": "tradle.PersonalInfo",
+    "_s": "...",
+    "firstName": "Michael",
+    "lastName": "Mann",
+    "dateOfBirth": "9/20/1976",
+    "placeOfBirth": "New Jersey, US",
+    "houseNumber": "30",
+    "city": "New York",
+    "region": "New York",
+    "postalCode": "10023",
+    "country": {
+      "id": "tradle.Country_123",
+      "title": "US"
+    },
+    "street": "Lincoln Center Plaza",
+    "nationality": {
+      "title": "American",
+      "id": "tradle.Nationality_123"
+    },
+    "emailAddress": "ellen@tradle.io",
+    "idCardType": {
+      "title": "ID Card",
+      "id": "tradle.IDCardType_123"
+    },
+    "idCardNumber": "K1234 22333 55566",
+    "maritalStatus": {
+      "title": "Married",
+      "id": "tradle.MaritalStatus_123"
+    },
+    "sex": {
+      "id": "tradle.Sex_cebcb4db2796c1906d67793d6f00d977fce9f8ca",
+      "title": "Male"
+    },
+    "phones": [
+      {
+        "number": "12123334444",
+        "phoneType": {
+          "id": "tradle.PhoneType_4b3d018c5085bc93de73405760a5d2fbcbef6c78",
+          "title": "Mobile"
+        }
+      }
+    ],
+    "photos": [
+      {
+        "url": "data:image/jpeg;base64,A9iuisEE9XgILtoM6VChQcCey5vXBsvqeN1WMENPomA"
+      }
+    ],
+    "education": {
+      "title": "College",
+      "id": "tradle.EducationNL_123"
+    }
+  },
+  "tradle.DrivingLicense": {
+    "_t": "tradle.DrivingLicense",
+    "_s": "...",
+    "licenseNumber": "1234567890",
+    "photos": [
+      {
+        "url": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI="
+      }
+    ]
+  },
+  "tradle.Selfie": {
+    "_t": "tradle.Selfie",
+    "_s": "...",
+    "photos": [
+      {
+        "url": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI="
+      }
+    ]
+  }
+}

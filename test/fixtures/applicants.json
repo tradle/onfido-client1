@@ -1,0 +1,25 @@
+[
+  {
+    "id": "0cc317bc-00a5-4e4b-8085-4485fceab85a",
+    "created_at": "2016-12-19T19:44:25Z",
+    "sandbox": true,
+    "title": null,
+    "first_name": "Logan",
+    "middle_name": null,
+    "last_name": "Ninefingers",
+    "email": "logan@firstlaw.com",
+    "gender": null,
+    "dob": null,
+    "telephone": null,
+    "mobile": null,
+    "nationality": null,
+    "country": "gbr",
+    "href": "/v2/applicants/0cc317bc-00a5-4e4b-8085-4485fceab85a",
+    "mothers_maiden_name": null,
+    "country_of_birth": null,
+    "town_of_birth": null,
+    "previous_last_name": null,
+    "id_numbers": [],
+    "addresses": []
+  }
+]
