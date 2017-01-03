@@ -1,0 +1,21 @@
+{
+  "applicant": {
+    "firstName": "Ted",
+    "lastName": "Logan",
+    "email": "ted@wyldstallyns.io",
+    "gender": "Male",
+    "mobile": "1234567890"
+  },
+  "license": {
+    "link": "...",
+    "type": "driving_licence",
+    "file": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI=",
+    "filename": "license.jpg",
+    "side": "front"
+  },
+  "selfie": {
+    "link": "...",
+    "file": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI=",
+    "filename": "selfie.jpg"
+  }
+}

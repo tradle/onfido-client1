@@ -4,51 +4,31 @@ const co = Promise.coroutine
 const test = require('tape')
 const parseDataUri = require('parse-data-uri')
 const PassThrough = require('readable-stream').PassThrough
-const { utils } = require('@tradle/engine')
-const { omit } = utils
+const { shallowClone } = require('../utils')
 const createOnfido = require('../')
-const convert = require('../convert')
+// const convert = require('../convert')
 const mock = require('./mock')
 const fixtures = {
   applicants: require('./fixtures/applicants'),
   checks: require('./fixtures/checks'),
   documents: require('./fixtures/documents'),
   documentImages: require('./fixtures/document-images'),
-  tradle: require('./fixtures/tradle')
+  tradle: require('./fixtures/tradle'),
+  inputs: require('./fixtures/inputs')
 }
 
-test('convert', function (t) {
-  const pi = fixtures.tradle['tradle.PersonalInfo']
-  const applicant = convert.toOnfido(pi)
-  t.same(applicant, {
-    first_name: pi.firstName,
-    last_name: pi.lastName,
-    email: pi.emailAddress,
-    gender: pi.sex.title
-  })
-
-  const license = fixtures.tradle['tradle.DrivingLicense']
-  const olicense = convert.toOnfido(license)
-  t.same(omit(olicense, 'filename'), {
-    file: parseDataUri(license.photos[0].url).data,
-    // filename: 'license.jpg',
-    type: 'driving_license'
-  })
-
-  t.throws(() => convert.toTradle({ document_type: 'booglie' }))
-  t.throws(() => convert.toOnfido({ [TYPE]: 'tradle.SomeType' }))
-  t.end()
-})
+fixtures.inputs.license.file = parseDataUri(fixtures.inputs.license.file).data
+fixtures.inputs.selfie.file = parseDataUri(fixtures.inputs.selfie.file).data
 
 test('create applicant', co(function* (t) {
   const applicant = fixtures.applicants[0]
   const applicantId = applicant.id
   const onfido = mock.client({ applicants: [applicant] })
   const permalink = 'joe'
-  const personalInfo = fixtures.tradle['tradle.PersonalInfo']
+  const props = fixtures.inputs.applicant
   yield onfido.applicants.create({
     applicant: permalink,
-    personalInfo
+    props
   })
 
   const applicants = yield onfido.applicants.list()
@@ -56,7 +36,7 @@ test('create applicant', co(function* (t) {
   t.same(applicants[0], {
     permalink: permalink,
     onfido: applicant,
-    personalInfo: personalInfo,
+    props: props,
     documents: [],
     photos: [],
     checks: []
@@ -69,7 +49,7 @@ test('basic', co(function* (t) {
   const result = 'clear'
   const applicant = fixtures.applicants[0]
   const applicantId = applicant.id
-  const check = adjustCheck(fixtures.checks[applicantId][1], { status: 'in_progress' })
+  const check = adjustCheck(fixtures.checks[applicantId][1], { result: null, status: 'in_progress' })
   const document = fixtures.documents[applicantId][0]
   const pendingReport = check.reports[0]
   const completeCheck = adjustCheck(check, { status: 'complete', result })
@@ -80,33 +60,28 @@ test('basic', co(function* (t) {
   })
 
   const permalink = 'joe'
-  const personalInfo = fixtures.tradle['tradle.PersonalInfo']
   yield onfido.applicants.create({
     applicant: permalink,
-    personalInfo
+    props: fixtures.inputs.applicant
   })
 
   try {
-    yield onfido.checks.create({ applicant: permalink })
+    yield onfido.checks.create({ applicant: permalink, checkDocument: true })
     t.fail('should not be able to create check before uploading a document')
   } catch (err) {
     t.ok(/upload document/.test(err.message))
   }
 
-  const license = fixtures.tradle['tradle.DrivingLicense']
-  const photo = fixtures.tradle['tradle.Selfie']
+  const license = fixtures.inputs.license
+  const photo = fixtures.inputs.selfie
   yield onfido.uploadDocument({
     applicant: permalink,
     document: license
   })
 
   try {
-    yield onfido.checks.create({
-      applicant: permalink,
-      checkFace: true
-    })
-
-    t.fail('should not be able to create a face check before uploading a document')
+    yield onfido.checks.create({ applicant: permalink, checkDocument: true, checkFace: true })
+    t.fail('should not be able to create a face check before uploading a live photo')
   } catch (err) {
     t.ok(/upload a photo/.test(err.message))
   }
@@ -118,6 +93,7 @@ test('basic', co(function* (t) {
 
   yield onfido.checks.create({
     applicant: permalink,
+    checkDocument: true,
     checkFace: true
   })
 
@@ -126,8 +102,12 @@ test('basic', co(function* (t) {
     applicant: permalink,
     applicantId: applicantId,
     onfido: check,
-    document: utils.hexLink(license),
-    photo: utils.hexLink(photo)
+    latestDocument: license.link,
+    latestPhoto: photo.link,
+    checkDocument: true,
+    checkFace: true,
+    result: null,
+    status: 'in_progress'
   })
 
   const webhookReq = new PassThrough()
@@ -157,7 +137,16 @@ test('basic', co(function* (t) {
     }
   }
 
-  const awaitEvent = new Promise(resolve => onfido.on('check:' + result, resolve))
+  const awaitEvent = new Promise(resolve => {
+    onfido.on('check:' + result, function (check) {
+      t.equal(check.applicant, permalink)
+      t.equal(check.latestDocument, license.link)
+      t.equal(check.latestPhoto, photo.link)
+      t.equal(check.result, result)
+      t.equal(check.status, 'complete')
+      resolve()
+    })
+  })
 
   yield onfido.processEvent(webhookReq, webhookRes)
   try {
@@ -171,10 +160,10 @@ test('basic', co(function* (t) {
 }))
 
 function adjustCheck (obj, props) {
-  const copy = utils.clone(obj, props)
+  const copy = shallowClone(obj, props)
   if (copy.reports) {
     copy.reports = copy.reports.map(r => {
-      return utils.clone(r, props)
+      return shallowClone(r, props)
     })
   }
 

@@ -1,12 +1,10 @@
 const { EventEmitter } = require('events')
 const Promise = require('bluebird')
 const co = Promise.coroutine
-const changesFeed = require('changes-feed')
 const typeforce = require('typeforce')
 const collect = Promise.promisify(require('stream-collector'))
 const memdown = require('memdown')
 const levelup = require('levelup')
-const { utils } = require('@tradle/engine')
 const createOnfido = require('../')
 
 module.exports = {

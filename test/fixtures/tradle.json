@@ -1,7 +1,7 @@
 {
   "tradle.PersonalInfo": {
     "_t": "tradle.PersonalInfo",
-    "_s": "...",
+    "_s": "IRwWmtWOKE3rGYWURKnb67Kch+/SACxBTvrWUlK/vMScdtC/LEnkEsYpDxNvENeWuUnk67vCsA0/IgmDaTq9JQ==",
     "firstName": "Michael",
     "lastName": "Mann",
     "dateOfBirth": "9/20/1976",
@@ -54,7 +54,7 @@
   },
   "tradle.DrivingLicense": {
     "_t": "tradle.DrivingLicense",
-    "_s": "...",
+    "_s": "EXataqtaQo2dmDS033nW1IwPkBGswYVMH86wiRhZauHKQ+kgCmMjxVgyHSTNkAYTgv3Yc2TLIA7X2bP1RjJwBw==",
     "licenseNumber": "1234567890",
     "photos": [
       {
@@ -64,7 +64,7 @@
   },
   "tradle.Selfie": {
     "_t": "tradle.Selfie",
-    "_s": "...",
+    "_s": "+y0Ap2emxIkf0OsZGAH6aE+kx0G1hJlsu80iGAcIoIa+97XCDOWY1iz2dwsbPYO2CCq1mjUVOcsBreFYYkTO9A==",
     "photos": [
       {
         "url": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI="

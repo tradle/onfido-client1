@@ -7,8 +7,9 @@ const secondary = require('level-secondary')
 const Promise = require('bluebird')
 const co = Promise.coroutine
 const collect = Promise.promisify(require('stream-collector'))
-const { utils } = require('@tradle/engine')
-const convert = require('./convert')
+const OnfidoTypes = require('@tradle/onfido-api/lib/types')
+// const convert = require('./convert')
+const { extend, omit } = require('./utils')
 const DB_OPTS = { valueEncoding: 'json' }
 const DEV = process.env.NODE_ENV !== 'production'
 // const promisesub = function (db, prefix, opts=DB_OPTS) {
@@ -17,6 +18,27 @@ const DEV = process.env.NODE_ENV !== 'production'
 
 // const getCheckStatus = status.getCheckStatus
 // const DEV = require('./dev')
+
+const types = {
+  applicantProps: typeforce.compile({
+    firstName: typeforce.String,
+    lastName: typeforce.String,
+    email: typeforce.maybe(typeforce.String),
+    gender: typeforce.maybe(typeforce.String),
+  }),
+  document: typeforce.compile({
+    link: typeforce.String,
+    type: OnfidoTypes.docType,
+    file: typeforce.Buffer,
+    filename: typeforce.String,
+    side: typeforce.maybe(typeforce.String)
+  }),
+  photo: typeforce.compile({
+    link: typeforce.String,
+    file: typeforce.Buffer,
+    filename: typeforce.String
+  })
+}
 
 module.exports = createClient
 
@@ -56,13 +78,13 @@ function createClient (opts) {
   const createApplicant = co(function* createApplicant (opts) {
     typeforce({
       applicant: typeforce.String,
-      personalInfo: typeforce.Object
+      props: types.applicantProps
     }, opts)
 
     const applicant = {
       permalink: opts.applicant,
-      onfido: yield api.applicants.create(convert.toOnfido(opts.personalInfo)),
-      personalInfo: opts.personalInfo,
+      onfido: yield api.applicants.create(toOnfidoApplicant(opts.props)),
+      props: opts.props,
       documents: [],
       photos: [],
       checks: []
@@ -76,14 +98,14 @@ function createClient (opts) {
   const updateApplicant = co(function* updateApplicant (opts) {
     typeforce({
       applicant: typeforce.String,
-      personalInfo: typeforce.Object
+      props: typeforce.Object
     }, opts)
 
     const current = yield applicants.getAsync(opts.applicant)
-    const oApplicant = yield api.applicants.update(current.onfido.id, convert.toOnfido(opts.personalInfo))
+    const oApplicant = yield api.applicants.update(current.onfido.id, toOnfidoApplicant(opts.props))
     yield applicants.putAsync(opts.applicant, {
       onfido: oApplicant,
-      personalInfo: opts.personalInfo
+      props: opts.props
     })
   })
 
@@ -94,18 +116,15 @@ function createClient (opts) {
   const uploadDocument = co(function* uploadDocument (opts) {
     typeforce({
       applicant: typeforce.String,
-      document: typeforce.Object
+      document: types.document
     }, opts)
 
     yield ensureNoPendingCheck(opts.applicant)
 
     const applicant = yield applicants.getAsync(opts.applicant)
-    const doc = yield api.applicants.uploadDocument(applicant.onfido.id, convert.toOnfido(opts.document))
+    const doc = yield api.applicants.uploadDocument(applicant.onfido.id, omit(opts.document, ['link']))
     applicant.documents.push({
-      tradle: {
-        link: utils.hexLink(opts.document),
-        object: opts.document
-      },
+      tradle: opts.document.link,
       onfido: doc
     })
 
@@ -116,21 +135,19 @@ function createClient (opts) {
   const uploadLivePhoto = co(function* uploadLivePhoto (opts) {
     typeforce({
       applicant: typeforce.String,
-      photo: typeforce.Object
+      photo: types.photo
     }, opts)
 
     yield ensureNoPendingCheck(opts.applicant)
 
     const applicant = yield applicants.getAsync(opts.applicant)
-    const photo = yield api.applicants.uploadLivePhoto(applicant.onfido.id, convert.toOnfido(opts.photo))
+    const photo = yield api.applicants.uploadLivePhoto(applicant.onfido.id, omit(opts.photo, ['link']))
     applicant.photos.push({
-      tradle: {
-        link: utils.hexLink(opts.photo),
-        object: opts.photo
-      },
+      tradle: opts.photo.link,
       onfido: photo
     })
 
+    debug('uploaded photo for', opts.applicant)
     yield applicants.putAsync(opts.applicant, applicant)
   })
 
@@ -147,35 +164,58 @@ function createClient (opts) {
   const createCheck = co(function* createCheck (opts) {
     typeforce({
       applicant: typeforce.String,
-      checkFace: typeforce.maybe(typeforce.Boolean)
+      checkDocument: typeforce.maybe(typeforce.Boolean),
+      checkFace: typeforce.maybe(typeforce.Boolean),
+      result: typeforce.maybe(typeforce.String)
     }, opts)
 
     const permalink = opts.applicant
-    const checkFace = opts.checkFace
+    const { checkDocument, checkFace } = opts
+    if (!checkDocument && !checkFace) {
+      throw new Error('expected "checkDocument" and/or "checkFace"')
+    }
+
     yield ensureNoPendingCheck(permalink)
 
     const applicant = yield applicants.getAsync(permalink)
-    if (!applicant.documents.length) throw new Error('upload document before creating a check')
+    const reports = []
+    if (checkDocument) {
+      if (!applicant.documents.length) {
+        throw new Error('upload document before creating a check')
+      }
 
-    const reports = [{ name: 'document' }]
+      reports.push({ name: 'document' })
+    }
+
     if (checkFace) {
-      if (!applicant.photos.length) throw new Error('upload a photo before creating a check')
+      if (!applicant.photos.length) {
+        throw new Error('upload a photo before creating a check')
+      }
 
       reports.push({ name: 'facial_similarity' })
     }
 
     const applicantId = applicant.onfido.id
-    const document = last(applicant.documents).tradle.object
     const check = {
       onfido: yield api.checks.create(applicantId, { reports }),
       applicant: permalink,
       applicantId: applicantId,
-      document: utils.hexLink(document)
+      checkFace,
+      checkDocument
     }
 
-    if (checkFace) {
-      const photo = last(applicant.photos).tradle.object
-      check.photo = utils.hexLink(photo)
+    debug('created check for', permalink)
+    if (DEV && opts.result) {
+      check.onfido.result = opts.result
+      check.onfido.reports.forEach(r => r.result = opts.result)
+    }
+
+    if (applicant.documents.length) {
+      check.latestDocument = last(applicant.documents).tradle
+    }
+
+    if (applicant.photos.length) {
+      check.latestPhoto = last(applicant.photos).tradle
     }
 
     yield processCheck(check)
@@ -200,10 +240,13 @@ function createClient (opts) {
     })
 
     yield processCheck(check)
+    debug('updated check for', check.applicant)
   })
 
   const processCheck = co(function* processCheck (check) {
     const { result, status } = check.onfido
+    check.status = status
+    check.result = result
     const permalink = check.applicant
     if (status.indexOf('complete') !== 0) {
       yield pendingChecks.putAsync(permalink, check)
@@ -217,13 +260,15 @@ function createClient (opts) {
       pendingChecks.delAsync(permalink)
     ])
 
+    debug(`check for ${permalink} completed with result: ${result}`)
+
     ee.emit('check', {
       applicant: applicant.permalink,
       check: check
     })
 
     // allow subscribing to 'check:consider', 'check:complete'
-    ee.emit('check:' + result, utils.extend({
+    ee.emit('check:' + result, extend({
       applicant: applicant.permalink,
     }, check))
   })
@@ -291,7 +336,7 @@ function createClient (opts) {
 
   let pendingChecksStream
   const close = co(function* () {
-    pendingChecksStream.end()
+    pendingChecksStream.destroy()
     yield db.closeAsync()
   })
 
@@ -306,7 +351,7 @@ function createClient (opts) {
 
   start()
 
-  return utils.extend(ee, {
+  const client = extend(ee, {
     applicants: {
       list: listApplicants,
       get: getApplicant,
@@ -319,8 +364,11 @@ function createClient (opts) {
     },
     uploadDocument,
     uploadLivePhoto,
-    processEvent
+    processEvent,
+    close
   })
+
+  return client
 }
 
 // function getPendingCheck (applicant) {
@@ -329,4 +377,17 @@ function createClient (opts) {
 
 function last (arr) {
   return arr.length ? arr[arr.length - 1] : undefined
+}
+
+function toOnfidoApplicant (props) {
+  const copy = {}
+  for (var p in props) {
+    let op = p
+    if (p === 'firstName') op = 'first_name'
+    if (p === 'lastName') op = 'last_name'
+
+    copy[op] = props[p]
+  }
+
+  return copy
 }
