@@ -262,15 +262,13 @@ function createClient (opts) {
 
     debug(`check for ${permalink} completed with result: ${result}`)
 
-    ee.emit('check', {
+    const data = extend({
       applicant: applicant.permalink,
-      check: check
-    })
+    }, check)
 
+    ee.emit('check', data)
     // allow subscribing to 'check:consider', 'check:complete'
-    ee.emit('check:' + result, extend({
-      applicant: applicant.permalink,
-    }, check))
+    ee.emit('check:' + result, data)
   })
 
   const getPendingCheck = co(function* getPendingCheck (applicant) {
