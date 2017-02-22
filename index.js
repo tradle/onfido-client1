@@ -228,7 +228,7 @@ function createClient (opts) {
       check: typeforce.maybe(typeforce.Object)
     }, opts)
 
-    const { applicant, check } = opts
+    let { applicant, check } = opts
     if (!check) {
       if (!applicant) throw new Error('expected "applicant" or "check"')
       check = yield getPendingCheck(applicant)
@@ -379,7 +379,7 @@ function last (arr) {
 
 function toOnfidoApplicant (props) {
   const copy = {}
-  for (var p in props) {
+  for (let p in props) {
     let op = p
     if (p === 'firstName') op = 'first_name'
     if (p === 'lastName') op = 'last_name'

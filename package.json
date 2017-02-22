@@ -4,7 +4,8 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "test": "DEBUG=tradle:onfido BLUEBIRD_DEBUG=1 node test/index.js"
+    "test": "DEBUG=tradle:onfido BLUEBIRD_DEBUG=1 node test/index.js",
+    "lint": "eslint --quiet --ignore-path .gitignore ."
   },
   "dependencies": {
     "bluebird": "^3.4.7",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@tradle/onfido-api": "tradle/onfido-api",
+    "eslint": "^3.16.0",
     "levelup": "^1.3.3",
     "memdown": "^1.2.4",
     "readable-stream": "^2.2.2",

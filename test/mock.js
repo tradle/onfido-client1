@@ -78,17 +78,17 @@ function mockAPI ({ applicants, documents, checks, reports }) {
       }
     },
     reports: {
-      get: function (id) {
-        typeforce(typeforce.String, id)
+      // get: function (id) {
+      //   typeforce(typeforce.String, id)
 
-        if (report) {
-          return Promise.resolve(reports.shift())
-        }
+      //   if (report) {
+      //     return Promise.resolve(reports.shift())
+      //   }
 
-        const match = check.reports.find(r => r.id === id)
-        if (match) Promise.resolve(match)
-        else Promise.reject(new Error('report not found'))
-      }
+      //   const match = check.reports.find(r => r.id === id)
+      //   if (match) Promise.resolve(match)
+      //   else Promise.reject(new Error('report not found'))
+      // }
     },
     webhooks: {
       handleEvent: co(function* (req) {
