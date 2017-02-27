@@ -9,7 +9,7 @@ const co = Promise.coroutine
 const collect = Promise.promisify(require('stream-collector'))
 const OnfidoTypes = require('@tradle/onfido-api/lib/types')
 // const convert = require('./convert')
-const { extend, omit } = require('./utils')
+const { extend, omit, shallowClone } = require('./utils')
 const DB_OPTS = { valueEncoding: 'json' }
 const DEV = process.env.NODE_ENV !== 'production'
 // const promisesub = function (db, prefix, opts=DB_OPTS) {
@@ -69,6 +69,8 @@ function createClient (opts) {
   // webhooks.url = Promise.promisifyAll(webhooks.url)
 
   const pendingChecks = Promise.promisifyAll(db.sublevel('c', DB_OPTS))
+  const completeChecks = Promise.promisifyAll(db.sublevel('cc', DB_OPTS))
+
   pendingChecks.id = secondary(pendingChecks, 'id', function (check) {
     return check.onfido.id
   })
@@ -236,7 +238,8 @@ function createClient (opts) {
 
     check.onfido = yield api.checks.get({
       applicantId: check.applicantId,
-      checkId: check.onfido.id
+      checkId: check.onfido.id,
+      expandReports: true
     })
 
     yield processCheck(check)
@@ -252,6 +255,8 @@ function createClient (opts) {
       yield pendingChecks.putAsync(permalink, check)
       return
     }
+
+    yield completeChecks.putAsync(check.onfido.id, check)
 
     const applicant = yield applicants.getAsync(permalink)
     applicant.checks.push(check)
@@ -279,14 +284,20 @@ function createClient (opts) {
     return yield applicants.getAsync(applicant)
   })
 
-  const getCheckById = co(function* getCheckById (id) {
+  const getPendingCheckById = co(function* (id) {
     return yield pendingChecks.id.getAsync(id)
   })
 
   const processEvent = co(function* processEvent (req, res, desiredResult) {
+    const url = 'https://' + req.get('host') + req.originalUrl
+    const webhook = yield webhooks.getAsync(url)
+    if (!webhook) {
+      throw new Error('webhook not found for url: ' + url)
+    }
+
     let event
     try {
-      event = yield api.webhooks.handleEvent(req)
+      event = yield api.webhooks.handleEvent(req, webhook.token)
     } catch (err) {
       debug(err)
       return res.status(500).end()
@@ -295,23 +306,32 @@ function createClient (opts) {
     const { resource_type, action, object } = event
     if (DEV && desiredResult) object.result = desiredResult
 
+    const isCheckComplete = resource_type === 'check' && action === 'check.completed'
+    if (!isCheckComplete) return res.status(200).end()
+
     try {
-      if (resource_type === 'check') {
-        if (action === 'check.completed') {
-          const check = yield getCheckById(object.id)
-          yield updatePendingCheck({ check })
-        }
-      }
+      const complete = yield completeChecks.getAsync(object.id)
+      return res.status(200).end()
+    } catch (err) {
+    }
+
+    try {
+      const check = yield getPendingCheckById(object.id)
+      yield updatePendingCheck({ check })
     } catch (err) {
       debug(err)
-      return res.status(500).end()
+      return res.status(err.notFound ? 404 : 500).end()
     }
 
     res.status(200).end()
   })
 
   const registerWebhook = co(function* registerWebhook ({ url, events }) {
-    const existing = yield webhooks.getAsync(url)
+    let existing
+    try {
+      existing = yield webhooks.getAsync(url)
+    } catch (err) {}
+
     if (existing) throw new Error('webhook already registered')
 
     const webhook = yield api.webhooks.register({ url, events })
@@ -326,6 +346,13 @@ function createClient (opts) {
     const webhook = yield api.webhooks.unregister(url)
     yield webhooks.delAsync(webhook.url)
     return webhook
+  })
+
+  const listWebhooks = co(function* () {
+    const saved = yield collect(webhooks.createReadStream())
+    return saved.map(({ key, value }) => {
+      return extend({ url: key }, value)
+    })
   })
 
   const getOnfidoResource = co(function* (id) {
@@ -359,6 +386,12 @@ function createClient (opts) {
     checks: {
       create: createCheck,
       pending: getPendingCheck
+    },
+    webhooks: {
+      register: registerWebhook,
+      unregister: unregisterWebhook,
+      list: listWebhooks,
+      get: ({ url }) => webhooks.getAsync(url)
     },
     uploadDocument,
     uploadLivePhoto,
