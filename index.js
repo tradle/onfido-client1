@@ -9,7 +9,7 @@ const co = Promise.coroutine
 const collect = Promise.promisify(require('stream-collector'))
 const OnfidoTypes = require('@tradle/onfido-api/lib/types')
 // const convert = require('./convert')
-const { extend, omit, shallowClone } = require('./utils')
+const { extend, omit, shallowClone, clone } = require('./utils')
 const DB_OPTS = { valueEncoding: 'json' }
 const DEV = process.env.NODE_ENV !== 'production'
 // const promisesub = function (db, prefix, opts=DB_OPTS) {
@@ -51,23 +51,8 @@ function createClient (opts) {
   let { api, db } = opts
   db = Promise.promisifyAll(sublevel(db))
 
-  // {
-  //   onfido: {
-  //     // onfido applicant object
-  //   },
-  //   personalInfo: {
-  //     // tradle personalInfo object
-  //   }
-  // }
-
   const applicants = Promise.promisifyAll(db.sublevel('a', DB_OPTS))
   const webhooks = Promise.promisifyAll(db.sublevel('w', DB_OPTS))
-  // webhooks.url = secondary(webhooks, 'url', function (data) {
-  //   return data.url + '!' + data.id
-  // })
-
-  // webhooks.url = Promise.promisifyAll(webhooks.url)
-
   const pendingChecks = Promise.promisifyAll(db.sublevel('c', DB_OPTS))
   const completeChecks = Promise.promisifyAll(db.sublevel('cc', DB_OPTS))
 
@@ -236,14 +221,16 @@ function createClient (opts) {
       check = yield getPendingCheck(applicant)
     }
 
-    check.onfido = yield api.checks.get({
+    const currentStatus = check.status
+    const current = check.onfido
+    const update = check.onfido = yield api.checks.get({
       applicantId: check.applicantId,
       checkId: check.onfido.id,
       expandReports: true
     })
 
-    yield processCheck(check)
     debug('updated check for', check.applicant)
+    return yield processCheck(check)
   })
 
   const processCheck = co(function* processCheck (check) {
@@ -251,9 +238,13 @@ function createClient (opts) {
     check.status = status
     check.result = result
     const permalink = check.applicant
+    const ret = extend({
+      applicant: applicant.permalink,
+    }, check)
+
     if (status.indexOf('complete') !== 0) {
       yield pendingChecks.putAsync(permalink, check)
-      return
+      return ret
     }
 
     yield completeChecks.putAsync(check.onfido.id, check)
@@ -267,26 +258,15 @@ function createClient (opts) {
 
     debug(`check for ${permalink} completed with result: ${result}`)
 
-    const data = extend({
-      applicant: applicant.permalink,
-    }, check)
-
-    ee.emit('check', data)
+    ee.emit('check', ret)
     // allow subscribing to 'check:consider', 'check:complete'
-    ee.emit('check:' + result, data)
+    ee.emit('check:' + result, ret)
+    return ret
   })
 
-  const getPendingCheck = co(function* getPendingCheck (applicant) {
-    return yield pendingChecks.getAsync(applicant)
-  })
-
-  const getApplicant = co(function* getApplicant (applicant) {
-    return yield applicants.getAsync(applicant)
-  })
-
-  const getPendingCheckById = co(function* (id) {
-    return yield pendingChecks.id.getAsync(id)
-  })
+  const getPendingCheck = applicant => pendingChecks.getAsync(applicant)
+  const getApplicant = applicant => applicants.getAsync(applicant)
+  const getPendingCheckById = id => pendingChecks.id.getAsync(id)
 
   const processEvent = co(function* processEvent (req, res, desiredResult) {
     const url = 'https://' + req.get('host') + req.originalUrl
@@ -306,21 +286,50 @@ function createClient (opts) {
     const { resource_type, action, object } = event
     if (DEV && desiredResult) object.result = desiredResult
 
-    const isCheckComplete = resource_type === 'check' && action === 'check.completed'
-    if (!isCheckComplete) return res.status(200).end()
+    if (!/\.completed?$/.test(action)) {
+      return res.status(200).end()
+    }
+
+    let checkId
+    if (resource_type === 'report') {
+      checkId = parseReportURL(object.href).checkId
+    } else if (resource_type === 'check') {
+      checkId = object.id
+    } else {
+      debug('unknown resource_type: ' + resource_type)
+      return res.status(404).end()
+    }
 
     try {
-      const complete = yield completeChecks.getAsync(object.id)
+      const complete = yield completeChecks.getAsync(checkId)
       return res.status(200).end()
     } catch (err) {
     }
 
+    let current
     try {
-      const check = yield getPendingCheckById(object.id)
-      yield updatePendingCheck({ check })
+      current = yield getPendingCheckById(checkId)
     } catch (err) {
       debug(err)
       return res.status(err.notFound ? 404 : 500).end()
+    }
+
+    let update
+    try {
+      update = yield updatePendingCheck({ check: clone(current) })
+    } catch (err) {
+      debug(err)
+      return res.status(500).end()
+    }
+
+    const reports = getCompletedReports({ current, update })
+    if (reports) {
+      reports.forEach(report => {
+        ee.emit('report:complete', {
+          check: update,
+          report
+        })
+      })
     }
 
     res.status(200).end()
@@ -421,4 +430,22 @@ function toOnfidoApplicant (props) {
   }
 
   return copy
+}
+
+function parseReportURL (url) {
+  const [match, checkId, reportId] = url.match(/checks\/([a-zA-Z0-9-_]+)\/reports\/([a-zA-Z0-9-_]+)/)
+  return { checkId, reportId }
+}
+
+function getCompletedReports ({ current, update }) {
+  return update.reports.filter(report => {
+    if (!isComplete(report)) return
+
+    const match = current.reports.find(r => r.id === report.id)
+    if (match) return !isComplete(match)
+  })
+}
+
+function isComplete (onfidoObject) {
+  return (onfidoObject.status || '').indexOf('complete') !== -1
 }
