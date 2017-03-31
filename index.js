@@ -12,19 +12,28 @@ const OnfidoTypes = require('@tradle/onfido-api/lib/types')
 const { extend, omit, shallowClone, clone } = require('./utils')
 const DB_OPTS = { valueEncoding: 'json' }
 const DEV = process.env.NODE_ENV !== 'production'
-// const promisesub = function (db, prefix, opts=DB_OPTS) {
-//   return Promise.promisifyAll(sub(db, prefix, opts))
-// }
+function identityCheckType (variant) {
+  return variant === 'kyc' || variant === 'standard'
+}
 
-// const getCheckStatus = status.getCheckStatus
-// const DEV = require('./dev')
+const addressType = typeforce.compile({
+  flat_number: typeforce.maybe(typeforce.String),
+  building_number: typeforce.oneOf(typeforce.Number, typeforce.String),
+  street: typeforce.String,
+  sub_street: typeforce.maybe(typeforce.String),
+  town: typeforce.String,
+  postcode: typeforce.String,
+  country: str => typeof str === 'string' && str.length === 3
+})
 
 const types = {
+  address: addressType,
   applicantProps: typeforce.compile({
-    firstName: typeforce.String,
-    lastName: typeforce.String,
+    first_name: typeforce.String,
+    last_name: typeforce.String,
     email: typeforce.maybe(typeforce.String),
     gender: typeforce.maybe(typeforce.String),
+    addresses: typeforce.maybe(typeforce.arrayOf(addressType))
   }),
   document: typeforce.compile({
     link: typeforce.String,
@@ -62,15 +71,17 @@ function createClient (opts) {
 
   pendingChecks.id = Promise.promisifyAll(pendingChecks.id)
 
-  const createApplicant = co(function* createApplicant (opts) {
+  const createApplicant = co(function* (opts) {
     typeforce({
       applicant: typeforce.String,
-      props: types.applicantProps
+      props: types.applicantProps,
+      tradle: typeforce.maybe(typeforce.Object)
     }, opts)
 
     const applicant = {
       permalink: opts.applicant,
-      onfido: yield api.applicants.create(toOnfidoApplicant(opts.props)),
+      onfido: yield api.applicants.create(opts.props),
+      tradle: opts.tradle,
       props: opts.props,
       documents: [],
       photos: [],
@@ -82,17 +93,19 @@ function createClient (opts) {
     return applicant
   })
 
-  const updateApplicant = co(function* updateApplicant (opts) {
+  const updateApplicant = co(function* (opts) {
     typeforce({
       applicant: typeforce.String,
-      props: typeforce.Object
+      props: typeforce.Object,
+      tradle: typeforce.maybe(typeforce.Object)
     }, opts)
 
     const current = yield applicants.getAsync(opts.applicant)
-    const oApplicant = yield api.applicants.update(current.onfido.id, toOnfidoApplicant(opts.props))
+    const oApplicant = yield api.applicants.update(current.onfido.id, opts.props)
     yield applicants.putAsync(opts.applicant, {
       onfido: oApplicant,
-      props: opts.props
+      props: extend(current.props, opts.props),
+      tradle: extend(current.tradle || {}, opts.tradle || {})
     })
   })
 
@@ -100,7 +113,7 @@ function createClient (opts) {
     return collect(applicants.createValueStream())
   })
 
-  const uploadDocument = co(function* uploadDocument (opts) {
+  const uploadDocument = co(function* (opts) {
     typeforce({
       applicant: typeforce.String,
       document: types.document
@@ -119,7 +132,7 @@ function createClient (opts) {
     yield applicants.putAsync(opts.applicant, applicant)
   })
 
-  const uploadLivePhoto = co(function* uploadLivePhoto (opts) {
+  const uploadLivePhoto = co(function* (opts) {
     typeforce({
       applicant: typeforce.String,
       photo: types.photo
@@ -148,18 +161,19 @@ function createClient (opts) {
     throw new Error('wait till the current check is resolved')
   })
 
-  const createCheck = co(function* createCheck (opts) {
+  const createCheck = co(function* (opts) {
     typeforce({
       applicant: typeforce.String,
       checkDocument: typeforce.maybe(typeforce.Boolean),
       checkFace: typeforce.maybe(typeforce.Boolean),
+      checkIdentity: typeforce.maybe(identityCheckType),
       result: typeforce.maybe(typeforce.String)
     }, opts)
 
     const permalink = opts.applicant
-    const { checkDocument, checkFace } = opts
-    if (!checkDocument && !checkFace) {
-      throw new Error('expected "checkDocument" and/or "checkFace"')
+    const { checkDocument, checkFace, checkIdentity } = opts
+    if (!checkDocument && !checkFace && !checkIdentity) {
+      throw new Error('expected "checkDocument" (and/or) "checkFace" (and/or) "checkIdentity')
     }
 
     yield ensureNoPendingCheck(permalink)
@@ -182,13 +196,26 @@ function createClient (opts) {
       reports.push({ name: 'facial_similarity' })
     }
 
+    if (checkIdentity) {
+      const { dateOfBirth, addresses } = applicant.props
+      if (!dateOfBirth && addresses && addresses.length) {
+        throw new Error('address is required for identity check')
+      }
+
+      reports.push({
+        name: 'identity',
+        variant: checkIdentity
+      })
+    }
+
     const applicantId = applicant.onfido.id
     const check = {
       onfido: yield api.checks.create(applicantId, { reports }),
       applicant: permalink,
       applicantId: applicantId,
       checkFace,
-      checkDocument
+      checkDocument,
+      checkIdentity
     }
 
     debug('created check for', permalink)
@@ -205,11 +232,11 @@ function createClient (opts) {
       check.latestPhoto = last(applicant.photos).tradle
     }
 
-    yield processCheck(check)
+    yield processCheck({ update: check })
     // yield applicants.putAsync(opts.applicant, applicant)
   })
 
-  const updatePendingCheck = co(function* updatePendingCheck (opts) {
+  const updatePendingCheck = co(function* (opts) {
     typeforce({
       applicant: typeforce.maybe(typeforce.String),
       check: typeforce.maybe(typeforce.Object)
@@ -222,47 +249,56 @@ function createClient (opts) {
     }
 
     const currentStatus = check.status
-    const current = check.onfido
-    const update = check.onfido = yield api.checks.get({
+    const current = clone(check)
+    check.onfido = yield api.checks.get({
       applicantId: check.applicantId,
       checkId: check.onfido.id,
       expandReports: true
     })
 
     debug('updated check for', check.applicant)
-    return yield processCheck(check)
+    return yield processCheck({
+      current,
+      update: check
+    })
   })
 
-  const processCheck = co(function* processCheck (check) {
+  const processCheck = co(function* ({ current, update }) {
+    const check = update
     const { result, status } = check.onfido
     check.status = status
     check.result = result
     const permalink = check.applicant
-    const ret = extend({
-      applicant: applicant.permalink,
-    }, check)
-
+    const applicant = yield applicants.getAsync(permalink)
+    const ret = { applicant, check }
     if (status.indexOf('complete') !== 0) {
       yield pendingChecks.putAsync(permalink, check)
-      return ret
+    } else {
+      yield completeChecks.putAsync(check.onfido.id, check)
+
+      applicant.checks.push(check)
+      yield Promise.all([
+        applicants.putAsync(permalink, applicant),
+        pendingChecks.delAsync(permalink)
+      ])
+
+      debug(`check for ${permalink} completed with result: ${result}`)
+
+      ee.emit('check', ret)
+      // allow subscribing to 'check:consider', 'check:complete'
+      ee.emit('check:' + result, ret)
     }
 
-    yield completeChecks.putAsync(check.onfido.id, check)
-
-    const applicant = yield applicants.getAsync(permalink)
-    applicant.checks.push(check)
-    yield Promise.all([
-      applicants.putAsync(permalink, applicant),
-      pendingChecks.delAsync(permalink)
-    ])
-
-    debug(`check for ${permalink} completed with result: ${result}`)
-
-    ee.emit('check', ret)
-    // allow subscribing to 'check:consider', 'check:complete'
-    ee.emit('check:' + result, ret)
+    emitCompletedReports({ applicant, current, update })
     return ret
   })
+
+  function emitCompletedReports ({ applicant, current, update }) {
+    const reports = getCompletedReports({ current, update })
+    reports.forEach(report => {
+      ee.emit('report:complete', { applicant, report, check: update })
+    })
+  }
 
   const getPendingCheck = applicant => pendingChecks.getAsync(applicant)
   const getApplicant = applicant => applicants.getAsync(applicant)
@@ -315,27 +351,21 @@ function createClient (opts) {
     }
 
     let update
+    let applicant
     try {
-      update = yield updatePendingCheck({ check: clone(current) })
+      const result = yield updatePendingCheck({ check: clone(current) })
+      update = result.check
+      applicant = result.applicant
     } catch (err) {
       debug(err)
       return res.status(500).end()
     }
 
-    const reports = getCompletedReports({ current, update })
-    if (reports) {
-      reports.forEach(report => {
-        ee.emit('report:complete', {
-          check: update,
-          report
-        })
-      })
-    }
-
+    emitCompletedReports({ applicant, current, update })
     res.status(200).end()
   })
 
-  const registerWebhook = co(function* registerWebhook ({ url, events }) {
+  const registerWebhook = co(function* ({ url, events }) {
     let existing
     try {
       existing = yield webhooks.getAsync(url)
@@ -348,7 +378,7 @@ function createClient (opts) {
     return webhook
   })
 
-  const unregisterWebhook = co(function* unregisterWebhook (url) {
+  const unregisterWebhook = co(function* (url) {
     const existing = yield webhooks.getAsync(url)
     if (!existing) throw new Error('webhook not found')
 
@@ -375,7 +405,7 @@ function createClient (opts) {
   })
 
   const ee = new EventEmitter()
-  const start = co(function* start () {
+  const start = co(function* () {
     pendingChecksStream = pendingChecks.createValueStream()
       .on('data', pending => {
         updatePendingCheck({ applicant: pending.applicant })
@@ -402,6 +432,7 @@ function createClient (opts) {
       list: listWebhooks,
       get: ({ url }) => webhooks.getAsync(url)
     },
+    getAddressesForPostcode: api.misc.getAddressesForPostcode,
     uploadDocument,
     uploadLivePhoto,
     processEvent,
@@ -411,25 +442,8 @@ function createClient (opts) {
   return client
 }
 
-// function getPendingCheck (applicant) {
-//   return applicant.checks.some(c => c.onfido.status !== 'complete')
-// }
-
 function last (arr) {
   return arr.length ? arr[arr.length - 1] : undefined
-}
-
-function toOnfidoApplicant (props) {
-  const copy = {}
-  for (let p in props) {
-    let op = p
-    if (p === 'firstName') op = 'first_name'
-    if (p === 'lastName') op = 'last_name'
-
-    copy[op] = props[p]
-  }
-
-  return copy
 }
 
 function parseReportURL (url) {
@@ -438,6 +452,11 @@ function parseReportURL (url) {
 }
 
 function getCompletedReports ({ current, update }) {
+  if (update.onfido) update = update.onfido
+  if (!current) return update.reports.filter(isComplete)
+
+  if (current.onfido) current = current.onfido
+
   return update.reports.filter(report => {
     if (!isComplete(report)) return
 
