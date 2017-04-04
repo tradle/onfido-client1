@@ -197,8 +197,8 @@ function createClient (opts) {
     }
 
     if (checkIdentity) {
-      const { date_of_birth, addresses } = applicant.props
-      if (!(date_of_birth && addresses && addresses.length)) {
+      const { dob, addresses } = applicant.props
+      if (!(dob && addresses && addresses.length)) {
         throw new Error('address is required for identity check')
       }
 
