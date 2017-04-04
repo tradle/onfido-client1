@@ -306,8 +306,10 @@ function createClient (opts) {
 
   const processEvent = co(function* processEvent (req, res, desiredResult) {
     const url = 'https://' + req.get('host') + req.originalUrl
-    const webhook = yield webhooks.getAsync(url)
-    if (!webhook) {
+    let webhook
+    try {
+      webhook = yield webhooks.getAsync(url)
+    } catch (err) {
       throw new Error('webhook not found for url: ' + url)
     }
 
