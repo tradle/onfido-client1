@@ -102,11 +102,11 @@ function createClient (opts) {
 
     const current = yield applicants.getAsync(opts.applicant)
     const oApplicant = yield api.applicants.update(current.onfido.id, opts.props)
-    yield applicants.putAsync(opts.applicant, {
+    yield applicants.putAsync(opts.applicant, extend(current, {
       onfido: oApplicant,
       props: extend(current.props, opts.props),
       tradle: extend(current.tradle || {}, opts.tradle || {})
-    })
+    }))
   })
 
   const listApplicants = co(function* () {
